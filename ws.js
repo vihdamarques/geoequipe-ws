@@ -1,5 +1,6 @@
 
 var mysql     = require('mysql')
+   ,async     = require('async')
    ,express   = require('express')
    ,app       = express()
    ,DBConfigs = {
@@ -13,10 +14,7 @@ var mysql     = require('mysql')
    ,running   = false
    ,porta     = 3014;
 
-/*app.get('/', function(req, res){
-  res.send('hello world');
-});*/
-
+// Recepção de dados
 app.get('/sinal/:dados', function(req, res){
   console.log('Conexão recebida. IP: ' + req.ip);
 
@@ -27,6 +25,7 @@ app.get('/sinal/:dados', function(req, res){
   res.end();
 });
 
+// Webservice de dados
 app.get('/json/:equip/:hora_ini/:hora_fim', function(){
   
 });
@@ -37,55 +36,92 @@ console.log('Escutando a porta ' + porta + '...');
 function processarSinal() {
   if (fila.length > 0) {
     if (!running) running = true;
-    var atual = fila.shift(); // retorna o primeiro item do array e o remove do array
-    console.log('Iniciou processamento do codigo:' + atual.codigo);
+    // retorna o primeiro item do array e o remove do array
+    var atual = fila.shift();
+    console.log(atual.codigo + ' - Iniciou');
 
     try {
-      var sinal;
+      var sinal, v_id_usuario, v_id_equipamento, erro, conn, params;
 
+      // tenta converter o parametro em base64 da url, converter para texto e depois para JSON
       try {
          sinal = JSON.parse(new Buffer(atual.dados.replace(/-/g,'+').replace(/_/,'/'), 'base64').toString('utf8'));
       } catch(err) {
         throw "Falha ao fazer parse do JSON enviado ! ERR: " + err;
       }
-      var erro = checarDados(sinal);
+      erro = checarDados(sinal);
 
       if(!!erro) {
-
         throw erro;
-
       } else {
+        async.series([
+          function(callback) { // conectar DB
+            conn = getConexaoDB();
+            conn.connect(function(err) {
+              if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
+              //conn.on('error',function(err){console.log(err.code)});
+              callback(null,'conectou');
+            });
+          }
+         ,function(callback) { // Verifica se o usuário existe
+            conn.query("select id_usuario from ge_usuario where id_usuario = ?", sinal.user, function(err, rows, fields) {
+              
+              if (!!err) callback("Erro ao verificar usuario ! ERR: " + err);
+              if (rows.length == 0)
+                callback("Usuario " + sinal.user + " nao encontrado!");
+              else
+                v_id_usuario = rows[0].id_usuario;
+              callback(null,'checou usuario');
+            });
+          }
+         ,function(callback) { // Verifica se o equipamento do imei recebido existe
+            conn.query("select id_equipamento from ge_equipamento where imei = ?;", sinal.imei, function(err, rows, fields) {
+              if (!!err) callback("Erro ao verificar equipamento ! ERR: " + err);
+              if (rows.length == 0)
+                callback("Equipamento " + sinal.imei + " nao encontrado!");
+              else
+                v_id_equipamento = rows[0].id_equipamento;
+              callback(null,'checou equipamento');
+            });
+          }
+         ,function(callback) { // Insere sinal
+            // Parametros que serao inseridos
+            params = [v_id_usuario
+                     ,v_id_equipamento
+                     ,sinal.data
+                     ,sinal.coord.lat
+                     ,sinal.coord.lng
+                     ,sinal.coord.lng
+                     ,sinal.coord.lat
+                     ];
+            conn.query("insert into ge_sinal (id_usuario,id_equipamento,data_sinal,data_servidor,latitude,longitude,coordenada) "
+                     + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now(),?,?,point(?,?));"
+                      ,params, function(err, rows, fields) {
+              if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
+              callback(null,'inseriu sinal');
+            });
+          }
+         ,function(callback) { // Finaliza conexao
+            conn.end();
+            callback(null, 'desconectou');
+          }
+        ], function(err, results) { // Tratamento de erros
+             if (!!err) console.log(atual.codigo + ' - Erro: ' + err);
+             console.log(atual.codigo + ' - Finalizou; tamanho da fila restante: ' + fila.length);
+             setTimeout(processarSinal, 100);
+        });
 
-      var conn = getConexaoDB();
-      conn.connect(function(err) {
-        if (!!err) throw "Erro ao conectar com o banco de dados ! ERR: " + err;
-      });
-
-      /*conn.query("INSERT INTO GE_TESTE VALUES (?)",[sinal.coord.lng], function(err, rows, fields){
-        if (!!err) throw "Erro ao executar comando no banco de dados ! ERR: " + err;
-      });*/
-
-      var prc_params = [sinal.imei, sinal.user, sinal.data, sinal.coord.lat, sinal.coord.lng];
-
-      conn.query("call PRC_RECEBE_SINAL(?,?,?,?,?);", prc_params, function(err, rows, fields){
-        if (!!err) throw "Erro ao executar comando no banco de dados ! ERR: " + err;
-      });
-
-      conn.end();
       }
 
     } catch (err) {
-      console.log('Erro ao processar sinal do codigo: ' + atual.codigo + ' ERR:' + err.message);
+      console.log(atual.codigo + ' - Erro:' + err.message);
     }
-
-    console.log('Finalizou codigo: ' + atual.codigo + '; tamanho da fila restante: ' + fila.length);
-    setTimeout(processarSinal, 100);
   } else {
     running = false;
   }
 }
 
-function getConexaoDB(){
+function getConexaoDB() {
   return mysql.createConnection(DBConfigs);
 }
 
@@ -119,10 +155,7 @@ function checarDados(sinal) {
 }
 
 function geraNovoCodigo() {
-  return Math.ceil(Math.random() * 89 + 10).toString()
-       + Math.ceil(Math.random() * 89 + 10).toString()
-       + Math.ceil(Math.random() * 89 + 10).toString()
-       + Math.ceil(Math.random() * 89 + 10).toString();
+  return Math.ceil(Math.random() * 9999999).toString();
 }
 
 //url: http://localhost:3014/sinal/eyJpbWVpIjoiMTExMTExMTExIiwidXNlciI6IjEiLCJkYXRhIjoiMjYvMDIvMjAxMyAxODoyMTozNyIsImNvb3JkIjp7ImxhdCI6Ii0yMy4xMjQxMzI0IiwibG5nIjoiLTQ2Ljc2NTg3MiJ9fQ==
