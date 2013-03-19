@@ -161,30 +161,12 @@ function getConexaoDB() {
 
 // Validação dos dados recebidos
 function checarDados(sinal) {
-  if (!sinal.imei) {
-    return "IMEI não localizado!";
-  }
-
-  if (!sinal.user) {
-    return "Usuário não localizado!";
-  }
-
-  if (!sinal.data) {
-    return "Longitude não localizada!";
-  }
-
-  if (!sinal.coord) {
-    return "Coordenadas não localizadas!";
-  }
-
-  if (!sinal.coord.lat) {
-    return "Latitude não localizada!";
-  }
-
-  if (!sinal.coord.lng) {
-    return "Longitude não localizada!";
-  }
-
+  if (!sinal.imei) return "IMEI não localizado!";
+  if (!sinal.user) return "Usuário não localizado!";
+  if (!sinal.data) return "Longitude não localizada!";
+  if (!sinal.coord) return "Coordenadas não localizadas!";
+  if (!sinal.coord.lat) return "Latitude não localizada!";
+  if (!sinal.coord.lng) return "Longitude não localizada!";
   return null;
 }
 
@@ -193,18 +175,15 @@ function geraNovoCodigo() {
 }
 
 function distancia(lat1, lng1, lat2, lng2) { // retorna distancia entre dois pontos em metros
-  try {
-    var raio_terra = 6378.136245 // em KM
-       ,rad        = 180 / Math.PI
-       ,arco_ab    = 90 - lat1
-       ,arco_ac    = 90 - lat2
-       ,arco_abc   = lng2 - lng1
-       ,arco_cos,distancia,g;
+  var raio_terra = 6378136.245 // em Metros
+     ,rad        = 180 / Math.PI
+     ,arco_ab    = 90 - lat1
+     ,arco_ac    = 90 - lat2
+     ,arco_abc   = lng2 - lng1
+     ,arco_cos;
 
-    arco_cos = (Math.cos(arco_ac/rad) * Math.cos(arco_ab/rad)) + (Math.sin(arco_ac/rad) * Math.sin(arco_ab/rad) * Math.cos(arco_abc/rad));
-    arco_cos = (Math.acos(arco_cos) * 180) / Math.PI;
+  arco_cos = (Math.cos(arco_ac/rad) * Math.cos(arco_ab/rad)) + (Math.sin(arco_ac/rad) * Math.sin(arco_ab/rad) * Math.cos(arco_abc/rad));
+  arco_cos = (Math.acos(arco_cos) * 180) / Math.PI;
 
-    g = 2 * Math.PI * raio_terra;
-
-    return Math.round((g * arco_cos) / 360 * 1000);
+  return Math.round((2 * Math.PI * raio_terra * arco_cos) / 360);
 }
