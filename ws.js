@@ -41,19 +41,20 @@ function processarSinal() {
     console.log(atual.codigo + ' - Iniciou');
 
     try {
-      var sinal, v_id_usuario, v_id_equipamento, erro, conn, params;
+      var sinal, v_id_usuario, v_id_equipamento, erro, conn;
 
-      // tenta converter o parametro em base64 da url, converter para texto e depois para JSON
+      // tenta converter o parametro em base64 da url, converter para string e depois para JSON
       try {
          sinal = JSON.parse(new Buffer(atual.dados.replace(/-/g,'+').replace(/_/,'/'), 'base64').toString('utf8'));
-      } catch(err) {
-        throw "Falha ao fazer parse do JSON enviado ! ERR: " + err;
+      } catch (err) {
+        throw "Falha ao fazer parse do JSON enviado ! ERR: " + err.message;
       }
-      erro = checarDados(sinal);
+      erro = checarDados(sinal); // valida se todas as informações foram preenchidas
 
       if(!!erro) {
         throw erro;
       } else {
+        // controla os processos assicronos
         async.series([
           function(callback) { // conectar DB
             conn = getConexaoDB();
@@ -75,7 +76,7 @@ function processarSinal() {
             });
           }
          ,function(callback) { // Verifica se o equipamento do imei recebido existe
-            conn.query("select id_equipamento from ge_equipamento where imei = ?;", sinal.imei, function(err, rows, fields) {
+            conn.query("select id_equipamento from ge_equipamento where imei = ?", sinal.imei, function(err, rows, fields) {
               if (!!err) callback("Erro ao verificar equipamento ! ERR: " + err);
               if (rows.length == 0)
                 callback("Equipamento " + sinal.imei + " nao encontrado!");
@@ -84,28 +85,61 @@ function processarSinal() {
               callback(null,'checou equipamento');
             });
           }
-         ,function(callback) { // Insere sinal
-            // Parametros que serao inseridos
-            params = [v_id_usuario
-                     ,v_id_equipamento
-                     ,sinal.data
-                     ,sinal.coord.lat
-                     ,sinal.coord.lng
-                     ,sinal.coord.lng
-                     ,sinal.coord.lat
-                     ];
-            conn.query("insert into ge_sinal (id_usuario,id_equipamento,data_sinal,data_servidor,latitude,longitude,coordenada) "
-                     + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now(),?,?,point(?,?));"
-                      ,params, function(err, rows, fields) {
-              if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
-              callback(null,'inseriu sinal');
+         ,function(callback) { // Verifica ultimo sinal
+            conn.query("select s.latitude, s.longitude, s.id_sinal "
+                     + "from ge_sinal s, ge_usuario u "
+                     + "where s.id_sinal = u.id_ultimo_sinal and u.id_usuario = ?", sinal.user, function(err, rows, fields) {
+              if (!!err) callback("Erro ao verificar ultimo sinal ! ERR: " + err);
+              if (rows.length == 0)
+                callback(null,'nao possui ultimo sinal');
+              else {
+                sinal.ultimoSinal = {id_sinal: rows[0].id_sinal, lat: rows[0].latitude, lng: rows[0].longitude};
+                callback(null,'pegou ultimo sinal');
+              }
             });
           }
-         ,function(callback) { // Finaliza conexao
-            conn.end();
-            callback(null, 'desconectou');
+         ,function(callback) { // Insere sinal
+            var dist;
+            if (!!sinal.ultimoSinal) dist = distancia(sinal.coord.lat, sinal.coord.lng, sinal.ultimoSinal.lat, sinal.ultimoSinal.lng);
+            // Grava se distancia for maior que 20 metros do ultimo ponto ou nao existir ultimo ponto
+            if (dist === undefined || dist > 20) {
+              conn.query("insert into ge_sinal (id_usuario,id_equipamento,data_sinal,data_servidor,latitude,longitude,coordenada) "
+                       + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now(),?,?,point(?,?))"
+                        ,[v_id_usuario,v_id_equipamento,sinal.data,sinal.coord.lat,sinal.coord.lng,sinal.coord.lng,sinal.coord.lat]
+                        ,function(err, rows, fields) {
+                if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
+                sinal.id_sinal = rows.insertId;
+                callback(null,"inseriu sinal");
+              });
+            } else {
+              callback(null,"nao precisou inserir sinal");
+            }
           }
+         ,function(callback) { // Atualiza ultimo sinal na tabela de usuario ou horario do ultimo sinal
+            if (!!sinal.id_sinal) {
+              conn.query("update ge_usuario  "
+                       + "set id_ultimo_sinal = ? "
+                       + "where id_usuario = ?"
+                        ,[sinal.id_sinal, sinal.user], function(err, rows, fields) {
+                if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
+                callback(null,"atualizou ultimo ponto");
+              });
+            } else if (!!sinal.ultimoSinal) {
+              conn.query("update ge_sinal  "
+                       + "set data_servidor = now()"
+                       + "   ,data_sinal = str_to_date(?,'%d/%m/%Y %H:%i:%S')"
+                       + "where id_sinal = ?"
+                        ,[sinal.data, sinal.ultimoSinal.id_sinal], function(err, rows, fields) {
+                if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
+                callback(null,"atualizou horario do ponto");
+              });
+            } else {
+              callback(null,"algo estranho aconteceu");
+            }
+         }
         ], function(err, results) { // Tratamento de erros
+             conn.end();
+             //console.log(atual.codigo + ' - Fila de ações: ' + results);
              if (!!err) console.log(atual.codigo + ' - Erro: ' + err);
              console.log(atual.codigo + ' - Finalizou; tamanho da fila restante: ' + fila.length);
              setTimeout(processarSinal, 100);
@@ -158,6 +192,19 @@ function geraNovoCodigo() {
   return Math.ceil(Math.random() * 9999999).toString();
 }
 
-//url: http://localhost:3014/sinal/eyJpbWVpIjoiMTExMTExMTExIiwidXNlciI6IjEiLCJkYXRhIjoiMjYvMDIvMjAxMyAxODoyMTozNyIsImNvb3JkIjp7ImxhdCI6Ii0yMy4xMjQxMzI0IiwibG5nIjoiLTQ2Ljc2NTg3MiJ9fQ==
+function distancia(lat1, lng1, lat2, lng2) { // retorna distancia entre dois pontos em metros
+  try {
+    var raio_terra = 6378.136245 // em KM
+       ,rad        = 180 / Math.PI
+       ,arco_ab    = 90 - lat1
+       ,arco_ac    = 90 - lat2
+       ,arco_abc   = lng2 - lng1
+       ,arco_cos,distancia,g;
 
-//sinal: {"imei":"111111111","user":"1","data":"26/02/2013 18:21:37","coord":{"lat":"-23.1241324","lng":"-46.765872"}}
+    arco_cos = (Math.cos(arco_ac/rad) * Math.cos(arco_ab/rad)) + (Math.sin(arco_ac/rad) * Math.sin(arco_ab/rad) * Math.cos(arco_abc/rad));
+    arco_cos = (Math.acos(arco_cos) * 180) / Math.PI;
+
+    g = 2 * Math.PI * raio_terra;
+
+    return Math.round((g * arco_cos) / 360 * 1000);
+}
