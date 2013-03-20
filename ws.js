@@ -9,6 +9,7 @@ var mysql     = require('mysql')
                  ,user: 'geuser'
                  ,password: 'metodista2013'
                  ,database: 'geoequipe'
+                 ,multipleStatements: true
                 }
    ,fila      = []
    ,running   = false
@@ -117,10 +118,13 @@ function processarSinal() {
           }
          ,function(callback) { // Atualiza ultimo sinal na tabela de usuario ou horario do ultimo sinal
             if (!!sinal.id_sinal) {
-              conn.query("update ge_usuario  "
+              conn.query("update ge_usuario "
                        + "set id_ultimo_sinal = ? "
-                       + "where id_usuario = ?"
-                        ,[sinal.id_sinal, sinal.user], function(err, rows, fields) {
+                       + "where id_usuario = ?; "
+                       + "update ge_equipamento "
+                       + "set id_ultimo_sinal = ? "
+                       + "where id_equipamento = ?"
+                        ,[sinal.id_sinal, v_id_usuario, sinal.id_sinal, v_id_equipamento], function(err, rows, fields) {
                 if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
                 callback(null,"atualizou ultimo ponto");
               });
@@ -139,7 +143,7 @@ function processarSinal() {
          }
         ], function(err, results) { // Tratamento de erros
              conn.end();
-             //console.log(atual.codigo + ' - Fila de ações: ' + results);
+             console.log(atual.codigo + ' - Fila de ações: ' + results);
              if (!!err) console.log(atual.codigo + ' - Erro: ' + err);
              console.log(atual.codigo + ' - Finalizou; tamanho da fila restante: ' + fila.length);
              setTimeout(processarSinal, 100);
