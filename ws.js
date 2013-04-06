@@ -1,6 +1,6 @@
-
 var mysql     = require('mysql')
    ,async     = require('async')
+   ,http      = require('http')
    ,express   = require('express')
    ,app       = express()
    ,DBConfigs = {
@@ -33,6 +33,9 @@ app.get('/json/:equip/:hora_ini/:hora_fim', function(){
 
 app.listen(porta);
 console.log('Escutando a porta ' + porta + '...');
+
+// Verifica endereços para geolocalização
+setTimeout(verificaEndereco, 100);
 
 function processarSinal() {
   if (fila.length > 0) {
@@ -159,6 +162,74 @@ function processarSinal() {
   }
 }
 
+function verificaEndereco() {
+  var conn, sinal = [];
+  async.series([
+    function(callback) { // conectar BD
+      conn = getConexaoDB();
+      conn.connect(function(err) {
+        if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
+        //conn.on('error',function(err){console.log(err.code)});
+        callback(null,'conectou');
+      });
+    }
+   ,function(callback) { // pegar lista de sinais sem endereco
+      conn.query("select id_sinal, latitude, longitude "
+               + "from ge_sinal "
+               + "where pais is null "
+               + "limit 0, 500"
+                ,function(err, rows, fields) {
+        if (!!err) callback("Erro ao listar sinais sem endereco ! ERR: " + err);
+          if (rows.length == 0)
+            callback(null,'nao possui ultimo sinal');
+          else {
+            for (var i = 0; i < rows.length; i++)
+              sinal.push({id_sinal: rows[i].id_sinal
+                         ,lat: rows[i].latitude
+                         ,lng: rows[i].longitude});
+            callback(null,"listou sinais sem endereço");
+          }
+      });
+    }
+   ,function(callback) {
+      var count = 0, enderecos = [], stm = "";
+        if (sinal.length > 0) {
+          for (var i = 0; i < sinal.length; i++) {
+            setTimeout(function(sinalAtual) {
+              reverseGeocode(sinalAtual.lat, sinalAtual.lng, function(end, id_sinal) {
+                enderecos.push({end: end, id_sinal: id_sinal});
+                if (++count == sinal.length) {
+                  for (var n = 0; n < enderecos.length; n++) {
+                    stm += "update ge_sinal "
+                         + "set logradouro = " + conn.escape(enderecos[n].end.logradouro)
+                               + ", numero = " + conn.escape(enderecos[n].end.numero)
+                               + ", bairro = " + conn.escape(enderecos[n].end.bairro)
+                               + ", cidade = " + conn.escape(enderecos[n].end.cidade)
+                               + ", estado = " + conn.escape(enderecos[n].end.estado)
+                                 + ", pais = " + conn.escape(enderecos[n].end.pais)
+                                  + ", cep = " + conn.escape(enderecos[n].end.cep)
+                        + " where id_sinal = " + conn.escape(enderecos[n].id_sinal)
+                        + "; ";
+                  }
+                  conn.query(stm, function(err, rows, fields) {
+                    if (!!err) callback("Erro ao listar sinais sem endereco ! ERR: " + err);
+                    console.log(count + " sinais atualizados");
+                    callback(null,"atualizou sinais");
+                  });
+                }
+              }, sinalAtual.id_sinal);
+            }, 400 * i, sinal[i]);
+          }
+        } else {
+          callback(null,"nao precisou atualizar nenhum registro");
+        }
+    }
+  ], function(err, results) { // Tratamento de erros
+       conn.end();
+       setTimeout(verificaEndereco, 120000);
+  });
+}
+
 function getConexaoDB() {
   return mysql.createConnection(DBConfigs);
 }
@@ -190,4 +261,56 @@ function distancia(lat1, lng1, lat2, lng2) { // retorna distancia entre dois pon
   arco_cos = (Math.acos(arco_cos) * 180) / Math.PI;
 
   return Math.round((2 * Math.PI * raio_terra * arco_cos) / 360);
+}
+
+function reverseGeocode(p_lat, p_lng, p_retorno, p_sinal) {
+  var options = {
+        host: 'maps.google.com',
+        port: 80,
+        path: '/maps/api/geocode/json?latlng=' + p_lat + ',' + p_lng + '&sensor=false'
+      }
+     ,resposta = "";
+
+  http.get(options, function(res) {
+    res.on('data', function(chunk){
+      resposta += chunk.toString('UTF8');
+    });
+
+    res.on('end', function() {
+      processar(resposta, p_retorno);
+    });
+
+  }).on('error', function(e) {
+    console.log("Got error: " + e.message);
+  });
+
+  function processar(json, p_retorno) {
+    json = JSON.parse(json);
+    var endereco = {endereco:"", pais:"", estado:"", cidade:"", bairro:"", logradouro:"", numero:"", cep:""}, results;
+    if (json.status === 'OK') {
+      endereco.endereco = json.results[0].formatted_address;
+      results = json.results[0].address_components;
+      for (var i  = 0; i < results.length; i++){
+        var types = "," + results[i].types.join() + ",";
+        if (!!~types.indexOf(",country,")) {
+          endereco.pais = results[i].long_name;
+        } else if (!!~types.indexOf(",administrative_area_level_1,")) {
+          endereco.estado = results[i].long_name;
+        } else if (!!~types.indexOf(",locality,")) {
+          endereco.cidade = results[i].long_name;
+        } else if (!!~types.indexOf(",sublocality,")) {
+          endereco.bairro = results[i].long_name;
+        } else if (!!~types.indexOf(",route,")) {
+          endereco.logradouro = results[i].long_name;
+        } else if (!!~types.indexOf(",street_number,")) {
+          endereco.numero = results[i].long_name;
+        } else if (!!~types.indexOf(",postal_code,")) {
+          endereco.cep = results[i].long_name;
+        }
+      }
+    } else if (json.status === 'ZERO_RESULTS') {
+    } else console.log('erro ao geocodificar: ' + json.status);
+    if (typeof p_retorno === "function")
+      p_retorno(endereco, p_sinal);
+  }
 }
