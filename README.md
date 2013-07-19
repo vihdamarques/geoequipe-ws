@@ -1,9 +1,15 @@
 # geoequipe-ws
 
-## URL para testes
+## URL para testes local
 
 ```
 http://localhost:3014/sinal/eyJpbWVpIjoiMTExMTExMTExIiwidXNlciI6IjEiLCJkYXRhIjoiMjYvMDIvMjAxMyAxODoyMTozNyIsImNvb3JkIjp7ImxhdCI6Ii0yMy4xMjQxMzI0IiwibG5nIjoiLTQ2Ljc2NTg3MiJ9fQ==
+```
+
+## URL para testes em produção
+
+```
+http://geoequipe.aws.af.cm/sinal/eyJpbWVpIjoiMTExMTExMTExIiwidXNlciI6IjEiLCJkYXRhIjoiMjYvMDIvMjAxMyAxODoyMTozNyIsImNvb3JkIjp7ImxhdCI6Ii0yMy4xMjQxMzI0IiwibG5nIjoiLTQ2Ljc2NTg3MiJ9fQ==
 ```
 
 Dados enviados:

@@ -4,30 +4,36 @@ var mysql     = require('mysql')
    ,express   = require('express')
    ,app       = express()
    ,DBConfigs = {
-                  host: 'localhost'
+                  host: 'geoequipe.com.br'
                  ,port: 3306
-                 ,user: 'geuser'
-                 ,password: 'metodista2013'
-                 ,database: 'geoequipe'
+                 ,user: 'blurb372_ge'
+                 ,password: 'geoequipe'
+                 ,database: 'blurb372_geoequipe'
                  ,multipleStatements: true
+                 ,insecureAuth: true
                 }
    ,fila      = []
    ,running   = false
    ,porta     = 3014;
 
+// Testa de App está rodando
+app.get('/', function(req, res){
+  res.end("App rodando... Fila: " + fila.length);
+});
+
 // Recepção de dados
-app.get('/sinal/:dados', function(req, res){
+app.get('/sinal/:dados', function(req, res) {
   console.log('Conexão recebida. IP: ' + req.ip);
 
   var obj = {ip: req.ip, dados: req.params.dados, codigo: geraNovoCodigo()};
   fila.push(obj);
 
   if (!running) setTimeout(processarSinal, 100);
-  res.end();
+  res.end("Solicitação recebida");
 });
 
 // Webservice de dados
-app.get('/json/:equip/:hora_ini/:hora_fim', function(){
+app.get('/json/:equip/:hora_ini/:hora_fim', function(req, res){
   
 });
 
@@ -64,7 +70,8 @@ function processarSinal() {
             conn = getConexaoDB();
             conn.connect(function(err) {
               if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
-              //conn.on('error',function(err){console.log(err.code)});
+              //conn.on('error',function(err){console.log(err.code)});){
+
               callback(null,'conectou');
             });
           }
@@ -90,26 +97,40 @@ function processarSinal() {
             });
           }
          ,function(callback) { // Verifica ultimo sinal
-            conn.query("select s.latitude, s.longitude, s.id_sinal "
+            conn.query("select s.latitude, s.longitude, s.id_sinal, date_format(s.data_sinal, '%d/%m/%Y %H:%i:%S') data_sinal "
                      + "from ge_sinal s, ge_usuario u "
                      + "where s.id_sinal = u.id_ultimo_sinal and u.id_usuario = ?", sinal.user, function(err, rows, fields) {
               if (!!err) callback("Erro ao verificar ultimo sinal ! ERR: " + err);
               if (rows.length == 0)
                 callback(null,'nao possui ultimo sinal');
               else {
-                sinal.ultimoSinal = {id_sinal: rows[0].id_sinal, lat: rows[0].latitude, lng: rows[0].longitude};
+                sinal.ultimoSinal = {id_sinal: rows[0].id_sinal, lat: rows[0].latitude, lng: rows[0].longitude, data: rows[0].data_sinal};
                 callback(null,'pegou ultimo sinal');
               }
             });
           }
          ,function(callback) { // Insere sinal
             var dist;
-            if (!!sinal.ultimoSinal) dist = distancia(sinal.coord.lat, sinal.coord.lng, sinal.ultimoSinal.lat, sinal.ultimoSinal.lng);
+            if (!!sinal.ultimoSinal) {
+              dist = distancia(sinal.coord.lat, sinal.coord.lng, sinal.ultimoSinal.lat, sinal.ultimoSinal.lng);
+              sinal.velocidade = (dist / ((toDate(sinal.data) - toDate(sinal.ultimoSinal.data)) / 1000)) * 3.6;
+              if (sinal.velocidade > 160) sinal.velocidade = 0;
+              console.log("dist: " + dist);
+              console.log("sinal.velocidade: " + sinal.velocidade);
+              console.log("sinal.coord.lat: "+sinal.coord.lat);
+              console.log("sinal.coord.lng: "+sinal.coord.lng);
+              console.log("sinal.ultimoSinal.lat: "+sinal.ultimoSinal.lat);
+              console.log("sinal.ultimoSinal.lng: "+sinal.ultimoSinal.lng);
+              console.log("sinal.data: "+sinal.data);
+              console.log("sinal.ultimoSinal.data: "+sinal.ultimoSinal.data);
+            } else {
+              sinal.velocidade = 0;
+            }
             // Grava se distancia for maior que 20 metros do ultimo ponto ou nao existir ultimo ponto
             if (dist === undefined || dist > 20) {
-              conn.query("insert into ge_sinal (id_usuario,id_equipamento,data_sinal,data_servidor,latitude,longitude,coordenada) "
-                       + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now(),?,?,point(?,?))"
-                        ,[v_id_usuario,v_id_equipamento,sinal.data,sinal.coord.lat,sinal.coord.lng,sinal.coord.lng,sinal.coord.lat]
+              conn.query("insert into ge_sinal (id_usuario,id_equipamento,data_sinal,data_servidor,latitude,longitude,coordenada,velocidade) "
+                       + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now(),?,?,point(?,?),?)"
+                        ,[v_id_usuario,v_id_equipamento,sinal.data,sinal.coord.lat,sinal.coord.lng,sinal.coord.lng,sinal.coord.lat, sinal.velocidade]
                         ,function(err, rows, fields) {
                 if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
                 sinal.id_sinal = rows.insertId;
@@ -133,10 +154,11 @@ function processarSinal() {
               });
             } else if (!!sinal.ultimoSinal) {
               conn.query("update ge_sinal  "
-                       + "set data_servidor = now()"
-                       + "   ,data_sinal = str_to_date(?,'%d/%m/%Y %H:%i:%S')"
-                       + "where id_sinal = ?"
-                        ,[sinal.data, sinal.ultimoSinal.id_sinal], function(err, rows, fields) {
+                       + "set data_servidor = now() "
+                       + "   ,data_sinal = str_to_date(?,'%d/%m/%Y %H:%i:%S') "
+                       + "   ,velocidade = ? "
+                       + "where id_sinal = ? "
+                        ,[sinal.data, sinal.velocidade, sinal.ultimoSinal.id_sinal], function(err, rows, fields) {
                 if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
                 callback(null,"atualizou horario do ponto");
               });
@@ -180,8 +202,8 @@ function verificaEndereco() {
                + "limit 0, 500"
                 ,function(err, rows, fields) {
         if (!!err) callback("Erro ao listar sinais sem endereco ! ERR: " + err);
-          if (rows.length == 0)
-            callback(null,'nao possui ultimo sinal');
+          if (!rows || rows.length == 0)
+            callback(null,'nenhum sinal sem endereço');
           else {
             for (var i = 0; i < rows.length; i++)
               sinal.push({id_sinal: rows[i].id_sinal
@@ -247,6 +269,13 @@ function checarDados(sinal) {
 
 function geraNovoCodigo() {
   return Math.ceil(Math.random() * 9999999).toString();
+}
+
+function toDate(p_data) {
+  var arr  = p_data.split(' ')
+     ,data = arr[0].split('/')
+     ,hora = arr[1];
+  return new Date(data[1] + '/' + data[0] + '/' + data[2] + ' ' + hora);
 }
 
 function distancia(lat1, lng1, lat2, lng2) { // retorna distancia entre dois pontos em metros
