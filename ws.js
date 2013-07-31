@@ -1,6 +1,7 @@
 var mysql     = require('mysql')
    ,async     = require('async')
    ,http      = require('http')
+   ,crypto    = require('crypto')
    ,express   = require('express')
    ,app       = express()
    ,DBConfigs = {
@@ -14,7 +15,8 @@ var mysql     = require('mysql')
                 }
    ,fila      = []
    ,running   = false
-   ,porta     = 3014;
+   ,porta     = 3014
+   ,key       = "G3@#qU1p";
 
 // Testa de App está rodando
 app.get('/', function(req, res){
@@ -37,6 +39,11 @@ app.get('/json/:equip/:hora_ini/:hora_fim', function(req, res){
   
 });
 
+// Webservice de tarefas
+app.get('/tarefa/:usuario/:id_tarefa', function(req, res){
+  
+});
+
 app.listen(porta);
 console.log('Escutando a porta ' + porta + '...');
 
@@ -51,12 +58,15 @@ function processarSinal() {
     console.log(atual.codigo + ' - Iniciou');
 
     try {
-      var sinal, v_id_usuario, v_id_equipamento, erro, conn;
+      var sinal, v_id_usuario, v_id_equipamento, erro, conn, bf;
 
-      // tenta converter o parametro em base64 da url, converter para string e depois para JSON
+      // tenta converter o parametro de base64 para urls para base64, descriptografar e depois converter para JSON
       try {
-         sinal = JSON.parse(new Buffer(atual.dados.replace(/-/g,'+').replace(/_/,'/'), 'base64').toString('utf8'));
+        bf    = new Blowfish(key);
+        sinal = JSON.parse(bf.decrypt(atual.dados.replace(/-/g,'+').replace(/_/g,'/')));
+        bf    = null;
       } catch (err) {
+        console.log("Falha ao fazer parse do JSON enviado ! ERR: " + err.message);
         throw "Falha ao fazer parse do JSON enviado ! ERR: " + err.message;
       }
       erro = checarDados(sinal); // valida se todas as informações foram preenchidas
@@ -341,5 +351,39 @@ function reverseGeocode(p_lat, p_lng, p_retorno, p_sinal) {
     } else console.log('erro ao geocodificar: ' + json.status);
     if (typeof p_retorno === "function")
       p_retorno(endereco, p_sinal);
+  }
+}
+
+function pad(text) {
+  pad_bytes = 8 - (text.length % 8)
+  for (var x=1; x<=pad_bytes;x++)
+    text = text + String.fromCharCode(0)
+  return text;
+}
+
+function Blowfish(_key) {
+  self = this;
+  var algorithm = "bf-ecb"
+     ,key       = _key;
+
+
+  self.encrypt = function(data) {
+    var cipher = crypto.createCipheriv(algorithm, Buffer(key), '');
+    cipher.setAutoPadding(false);
+    try {
+      return Buffer(cipher.update(pad(data), 'utf8', 'binary') + cipher.final('binary'), 'binary').toString('base64');
+    } catch (e) {
+      return null;
+    }
+  }
+
+  self.decrypt = function(data) {
+    var decipher = crypto.createDecipheriv(algorithm, Buffer(key), '');
+    decipher.setAutoPadding(false);
+    try {
+      return (decipher.update(Buffer(data, 'base64').toString('binary'), 'binary', 'utf8') + decipher.final('utf8')).replace(/\x00+$/g, '');
+    } catch (e) {
+      return null;
+    }
   }
 }
