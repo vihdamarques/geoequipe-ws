@@ -36,12 +36,50 @@ app.get('/sinal/:dados', function(req, res) {
 
 // Webservice de dados
 app.get('/json/:equip/:hora_ini/:hora_fim', function(req, res){
-  
+
 });
 
 // Webservice de tarefas
 app.get('/tarefa/:usuario/:id_tarefa', function(req, res){
-  
+
+});
+
+// Webservice de login
+app.get('/login/:usuario/:senha', function(req, res){
+  var usuario = req.params.usuario
+     ,senha   = req.params.senha
+     ,retorno = {erro: "", id_usuario: ""}
+     ,sha1, conn;
+
+    // criptografa senha para SHA1 para testar no banco de dados
+    sha1 = crypto.createHash('sha1');
+    sha1.update("wnhg9" + senha + "fwj98"); // salt utilizado no cadastro de usuarios do portal
+    senha = sha1.digest('hex');
+    sha1  = null;
+
+    async.series([
+    function(callback) { // conectar DB
+      conn = getConexaoDB();
+      conn.connect(function(err) {
+        if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
+        callback(null,'conectou');
+      });
+    }
+   ,function(callback) { // Pega ID do usuario
+      conn.query("select id_usuario from ge_usuario where usuario = ? and senha = ?", [usuario, senha], function(err, rows, fields) {
+        if (!!err) callback("Erro ao verificar usuario ! ERR: " + err);
+        if (rows.length == 0)
+          callback("Usuário e senha não conferem!");
+        else
+          retorno.id_usuario = rows[0].id_usuario;
+        callback(null,'checou usuario');
+      });
+    }
+    ], function(err, results) { // Tratamento de erros
+         conn.end();
+         if (!!err) retorno.erro = err;
+         res.end(JSON.stringify(retorno));
+    });
 });
 
 app.listen(porta);
@@ -80,8 +118,6 @@ function processarSinal() {
             conn = getConexaoDB();
             conn.connect(function(err) {
               if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
-              //conn.on('error',function(err){console.log(err.code)});){
-
               callback(null,'conectou');
             });
           }
@@ -201,7 +237,6 @@ function verificaEndereco() {
       conn = getConexaoDB();
       conn.connect(function(err) {
         if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
-        //conn.on('error',function(err){console.log(err.code)});
         callback(null,'conectou');
       });
     }
