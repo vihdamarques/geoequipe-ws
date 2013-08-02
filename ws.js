@@ -71,7 +71,7 @@ app.get('/login/:usuario/:senha', function(req, res){
         if (rows.length == 0)
           callback("Usuário e senha não conferem!");
         else
-          retorno.id_usuario = rows[0].id_usuario;
+          retorno.id_usuario = rows[0].id_usuario.toString();
         callback(null,'checou usuario');
       });
     }
