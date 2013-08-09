@@ -19,7 +19,7 @@ var mysql     = require('mysql')
    ,key       = "G3@#qU1p";
 
 // Testa de App está rodando
-app.get('/', function(req, res){
+app.get('/', function(req, res) {
   res.end("App rodando... Fila: " + fila.length);
 });
 
@@ -35,17 +35,72 @@ app.get('/sinal/:dados', function(req, res) {
 });
 
 // Webservice de dados
-app.get('/json/:equip/:hora_ini/:hora_fim', function(req, res){
+app.get('/json/:equip/:hora_ini/:hora_fim', function(req, res) {
 
 });
 
-// Webservice de tarefas
-app.get('/tarefa/:usuario/:id_tarefa', function(req, res){
+// Webservice de consulta de tarefas
+app.get("/tarefa/consulta/:id_usuario", function(req, res) {
+  var id_usuario = req.params.id_usuario
+     ,retorno    = {erro: "", tarefas: []}
+     ,conn;
+
+  async.series([
+    function(callback) { // conectar DB
+      conn = getConexaoDB();
+      conn.connect(function(err) {
+        if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
+        callback(null,"conectou");
+      });
+    }
+   ,function(callback) { // Pega ID do usuario
+      conn.query("select t.id_tarefa, t.descricao, l.latitude, l.longitude, l.nome as local "
+               + ",(select mm.apontamento from ge_tarefa_movto mm where mm.id_tarefa = t.id_tarefa and mm.status = 'T') as apontamento "
+               + "from ge_tarefa t, ge_local l, ge_tarefa_movto m "
+               + "where t.id_local  = l.id_local "
+               + "and t.id_tarefa = m.id_tarefa "
+               + "and m.status = 'G' "
+               + "and m.data = curdate() "
+               + "and m.id_usuario = ? "
+               + "order by m.ordem ", [id_usuario], function(err, rows, fields) {
+        if (!!err) callback("Erro ao verificar usuario ! ERR: " + err);
+
+        var tarefa;
+        if (!!rows)
+          for (var i = 0; i < rows.length; i++) {
+            tarefa             = {};
+            tarefa.id_tarefa   = rows[i].id_tarefa.toString();
+            tarefa.descricao   = rows[i].descricao.toString();
+            tarefa.local       = rows[i].local.toString();
+            tarefa.apontamento = rows[i].apontamento == null ? "" : rows[i].apontamento.toString();
+            tarefa.coord       = {};
+            tarefa.coord.lat   = rows[i].latitude.toString();
+            tarefa.coord.lng   = rows[i].longitude.toString();
+
+            retorno.tarefas.push(tarefa);
+          }
+
+        callback(null,"listou tarefas");
+      });
+    }
+    ], function(err, results) { // Tratamento de erros
+         conn.end();
+         if (!!err) retorno.erro = err;
+         res.end(JSON.stringify(retorno));
+    });
+  
+});
+
+// Webservice de concluir tarefas
+app.get('/tarefa/concluir/:dados', function(req, res) {
+  var dados   = req.params.dados
+     ,retorno = ""
+     ,conn;
 
 });
 
 // Webservice de login
-app.get('/login/:usuario/:senha', function(req, res){
+app.get('/login/:usuario/:senha', function(req, res) {
   var usuario = req.params.usuario
      ,senha   = req.params.senha
      ,retorno = {erro: "", id_usuario: ""}
