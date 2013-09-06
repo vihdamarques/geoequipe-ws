@@ -1,24 +1,26 @@
-var mysql     = require('mysql')
-   ,async     = require('async')
-   ,http      = require('http')
-   ,crypto    = require('crypto')
-   ,express   = require('express')
-   ,app       = express()
-   ,DBConfigs = {
-                  host: 'geoequipe.com.br'
-                 ,port: 3306
-                 ,user: 'blurb372_ge'
-                 ,password: 'geoequipe'
-                 ,database: 'blurb372_geoequipe'
-                 ,multipleStatements: true
-                 ,insecureAuth: true
-                }
-   ,fila      = []
-   ,running   = false
-   ,porta     = 3014
-   ,key       = "G3@#qU1p";
+var mysql       = require('mysql')
+   ,async       = require('async')
+   ,http        = require('http')
+   ,crypto      = require('crypto')
+   ,express     = require('express')
+   ,app         = express()
+   ,DBConfigs   = {
+                    host: 'geoequipe.com.br'
+                   ,port: 3306
+                   ,user: 'blurb372_ge'
+                   ,password: 'geoequipe'
+                   ,database: 'blurb372_geoequipe'
+                   ,multipleStatements: true
+                   ,insecureAuth: true
+                  }
+   ,fila        = []
+   ,running     = false
+   ,porta       = 3014
+   ,key         = "G3@#qU1p"
+   ,fusoHorario = "+2" // Caso servidor esteja em fuso horario errado
+   ;
 
-// Testa de App está rodando
+// Testa se App está rodando
 app.get('/', function(req, res) {
   res.end("App rodando... Fila: " + fila.length);
 });
@@ -32,11 +34,6 @@ app.get('/sinal/:dados', function(req, res) {
 
   if (!running) setTimeout(processarSinal, 100);
   res.end("Solicitação recebida");
-});
-
-// Webservice de dados
-app.get('/json/:equip/:hora_ini/:hora_fim', function(req, res) {
-
 });
 
 // Webservice de consulta de tarefas
@@ -88,7 +85,6 @@ app.get("/tarefa/consulta/:id_usuario", function(req, res) {
          if (!!err) retorno.erro = err;
          res.end(JSON.stringify(retorno));
     });
-  
 });
 
 // Webservice de concluir tarefas
@@ -96,7 +92,7 @@ app.get('/tarefa/concluir/:dados', function(req, res) {
   var dados   = req.params.dados
      ,retorno = ""
      ,conn;
-
+  res.end();
 });
 
 // Webservice de login
@@ -230,7 +226,7 @@ function processarSinal() {
             // Grava se distancia for maior que 20 metros do ultimo ponto ou nao existir ultimo ponto
             if (dist === undefined || dist > 20) {
               conn.query("insert into ge_sinal (id_usuario,id_equipamento,data_sinal,data_servidor,latitude,longitude,coordenada,velocidade) "
-                       + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now(),?,?,point(?,?),?)"
+                       + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now() + INTERVAL " + fusoHorario + " HOUR ,?,?,point(?,?),?)"
                         ,[v_id_usuario,v_id_equipamento,sinal.data,sinal.coord.lat,sinal.coord.lng,sinal.coord.lng,sinal.coord.lat, sinal.velocidade]
                         ,function(err, rows, fields) {
                 if (!!err) callback("Erro ao inserir sinal ! ERR: " + err);
@@ -255,7 +251,7 @@ function processarSinal() {
               });
             } else if (!!sinal.ultimoSinal) {
               conn.query("update ge_sinal  "
-                       + "set data_servidor = now() "
+                       + "set data_servidor = now() + INTERVAL " + fusoHorario + " HOUR "
                        + "   ,data_sinal = str_to_date(?,'%d/%m/%Y %H:%i:%S') "
                        + "   ,velocidade = ? "
                        + "where id_sinal = ? "
