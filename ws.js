@@ -294,7 +294,7 @@ function verificaEndereco() {
    ,function(callback) { // pegar lista de sinais sem endereco
       conn.query("select id_sinal, latitude, longitude "
                + "from ge_sinal "
-               + "where pais is null "
+               + "where pais = '' or pais is null "
                + "limit 0, 500"
                 ,function(err, rows, fields) {
         if (!!err) callback("Erro ao listar sinais sem endereco ! ERR: " + err);
