@@ -50,7 +50,7 @@ app.get("/tarefa/consulta/:id_usuario", function(req, res) {
         callback(null,"conectou");
       });
     }
-   ,function(callback) { // Pega ID do usuario
+   ,function(callback) { // Pega dados das tarefas
       conn.query("select t.id_tarefa, t.descricao, l.latitude, l.longitude, l.nome as local "
                + ",(select mm.apontamento from ge_tarefa_movto mm where mm.id_tarefa = t.id_tarefa and mm.status = 'T') as apontamento "
                + "from ge_tarefa t, ge_local l, ge_tarefa_movto m "
@@ -60,7 +60,7 @@ app.get("/tarefa/consulta/:id_usuario", function(req, res) {
                + "and m.data = curdate() "
                + "and m.id_usuario = ? "
                + "order by m.ordem ", [id_usuario], function(err, rows, fields) {
-        if (!!err) callback("Erro ao verificar usuario ! ERR: " + err);
+        if (!!err) callback("Erro ao listar tarefas ! ERR: " + err);
 
         var tarefa;
         if (!!rows)
@@ -91,8 +91,41 @@ app.get("/tarefa/consulta/:id_usuario", function(req, res) {
 app.get('/tarefa/concluir/:dados', function(req, res) {
   var dados   = req.params.dados
      ,retorno = ""
-     ,conn;
-  res.end();
+     ,sha1, conn, bf;
+
+  // tenta converter o parametro de base64 para urls para base64, descriptografar e depois converter para JSON
+  try {
+    bf    = new Blowfish(key);
+    dados = JSON.parse(bf.decrypt(dados.replace(/-/g,'+').replace(/_/g,'/')));
+    bf    = null;
+  } catch (err) {
+    console.log("Falha ao fazer parse do JSON enviado ! ERR: " + err.message);
+    throw "Falha ao fazer parse do JSON enviado ! ERR: " + err.message;
+  }
+
+  async.series([
+  function(callback) { // conectar DB
+    conn = getConexaoDB();
+    conn.connect(function(err) {
+      if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
+      callback(null,'conectou');
+    });
+  }
+ ,function(callback) { // Conclui tarefa
+    conn.query("insert into ge_tarefa_movto (id_tarefa_movto, id_tarefa, id_usuario, data, apontamento, status) "
+             + "values (null, ?, ?, now(), ?, 'T')", [dados.id_tarefa, dados.id_usuario, dados.apontamento], function(err, rows, fields) {
+      if (!!err)
+        callback("Erro ao concluir tarefa ! ERR: " + err);
+      else
+        retorno = "Tarefa concluida com sucesso!";
+      callback(null,'concluiu tarefa');
+    });
+  }
+  ], function(err, results) { // Tratamento de erros
+       conn.end();
+       if (!!err) retorno = err;
+       res.end(retorno);
+  });
 });
 
 // Webservice de login
@@ -102,35 +135,35 @@ app.get('/login/:usuario/:senha', function(req, res) {
      ,retorno = {erro: "", id_usuario: ""}
      ,sha1, conn;
 
-    // criptografa senha para SHA1 para testar no banco de dados
-    sha1 = crypto.createHash('sha1');
-    sha1.update("wnhg9" + senha + "fwj98"); // salt utilizado no cadastro de usuarios do portal
-    senha = sha1.digest('hex');
-    sha1  = null;
+  // criptografa senha para SHA1 para testar no banco de dados
+  sha1 = crypto.createHash('sha1');
+  sha1.update("wnhg9" + senha + "fwj98"); // salt utilizado no cadastro de usuarios do portal
+  senha = sha1.digest('hex');
+  sha1  = null;
 
-    async.series([
-    function(callback) { // conectar DB
-      conn = getConexaoDB();
-      conn.connect(function(err) {
-        if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
-        callback(null,'conectou');
-      });
-    }
-   ,function(callback) { // Pega ID do usuario
-      conn.query("select id_usuario from ge_usuario where usuario = ? and senha = ?", [usuario, senha], function(err, rows, fields) {
-        if (!!err) callback("Erro ao verificar usuario ! ERR: " + err);
-        if (rows.length == 0)
-          callback("Usuário e senha não conferem!");
-        else
-          retorno.id_usuario = rows[0].id_usuario.toString();
-        callback(null,'checou usuario');
-      });
-    }
-    ], function(err, results) { // Tratamento de erros
-         conn.end();
-         if (!!err) retorno.erro = err;
-         res.end(JSON.stringify(retorno));
+  async.series([
+  function(callback) { // conectar DB
+    conn = getConexaoDB();
+    conn.connect(function(err) {
+      if (!!err) callback("Erro ao conectar com o banco de dados ! ERR: " + err);
+      callback(null,'conectou');
     });
+  }
+ ,function(callback) { // Pega ID do usuario
+    conn.query("select id_usuario from ge_usuario where usuario = ? and senha = ?", [usuario, senha], function(err, rows, fields) {
+      if (!!err) callback("Erro ao verificar usuario ! ERR: " + err);
+      if (rows.length == 0)
+        callback("Usuário e senha não conferem!");
+      else
+        retorno.id_usuario = rows[0].id_usuario.toString();
+      callback(null,'checou usuario');
+    });
+  }
+  ], function(err, results) { // Tratamento de erros
+       conn.end();
+       if (!!err) retorno.erro = err;
+       res.end(JSON.stringify(retorno));
+  });
 });
 
 app.listen(porta);
@@ -223,8 +256,8 @@ function processarSinal() {
             } else {
               sinal.velocidade = 0;
             }
-            // Grava se distancia for maior que 20 metros do ultimo ponto ou nao existir ultimo ponto
-            if (dist === undefined || dist > 20) {
+            // Grava se distancia for maior que 40 metros do ultimo ponto ou nao existir ultimo ponto
+            if (dist === undefined || dist > 40) {
               conn.query("insert into ge_sinal (id_usuario,id_equipamento,data_sinal,data_servidor,latitude,longitude,coordenada,velocidade) "
                        + "values (?,?,str_to_date(?,'%d/%m/%Y %H:%i:%S'),now() + INTERVAL " + fusoHorario + " HOUR ,?,?,point(?,?),?)"
                         ,[v_id_usuario,v_id_equipamento,sinal.data,sinal.coord.lat,sinal.coord.lng,sinal.coord.lng,sinal.coord.lat, sinal.velocidade]
