@@ -17,7 +17,7 @@ var mysql       = require('mysql')
    ,running     = false
    ,porta       = 3014
    ,key         = "G3@#qU1p"
-   ,fusoHorario = "+2" // Caso servidor esteja em fuso horario errado
+   ,fusoHorario = "+3" // Caso servidor esteja em fuso horario errado
    ;
 
 // Testa se App está rodando
@@ -51,8 +51,12 @@ app.get("/tarefa/consulta/:id_usuario", function(req, res) {
       });
     }
    ,function(callback) { // Pega dados das tarefas
-      conn.query("select t.id_tarefa, t.descricao, l.latitude, l.longitude, l.nome as local "
-               + ",(select mm.apontamento from ge_tarefa_movto mm where mm.id_tarefa = t.id_tarefa and mm.status = 'T') as apontamento "
+      conn.query("select t.id_tarefa, t.descricao, l.latitude "
+               + ",l.longitude, l.nome as local "
+               + ",(select mm.apontamento "
+               + "    from ge_tarefa_movto mm "
+               + "   where mm.id_tarefa = t.id_tarefa "
+               + "     and mm.status = 'T') as apontamento "
                + "from ge_tarefa t, ge_local l, ge_tarefa_movto m "
                + "where t.id_local  = l.id_local "
                + "and t.id_tarefa = m.id_tarefa "
@@ -69,9 +73,9 @@ app.get("/tarefa/consulta/:id_usuario", function(req, res) {
             tarefa.id_tarefa   = rows[i].id_tarefa.toString();
             tarefa.descricao   = rows[i].descricao.toString();
             tarefa.local       = rows[i].local.toString();
-            tarefa.apontamento = rows[i].apontamento == null ? "" : rows[i].apontamento.toString();
+            tarefa.apontamento = (rows[i].apontamento || "").toString();
             tarefa.coord       = {};
-            tarefa.coord.lat   = rows[i].latitude.toString();
+            tarefa.coord.lat   = rows[i].latitude.toString(); 
             tarefa.coord.lng   = rows[i].longitude.toString();
 
             retorno.tarefas.push(tarefa);
@@ -93,7 +97,8 @@ app.get('/tarefa/concluir/:dados', function(req, res) {
      ,retorno = ""
      ,sha1, conn, bf;
 
-  // tenta converter o parametro de base64 para urls para base64, descriptografar e depois converter para JSON
+  // tenta converter o parametro de base64 para urls para base64,
+  // descriptografar e depois converter para JSON
   try {
     bf    = new Blowfish(key);
     dados = JSON.parse(bf.decrypt(dados.replace(/-/g,'+').replace(/_/g,'/')));
@@ -112,8 +117,12 @@ app.get('/tarefa/concluir/:dados', function(req, res) {
     });
   }
  ,function(callback) { // Conclui tarefa
-    conn.query("insert into ge_tarefa_movto (id_tarefa_movto, id_tarefa, id_usuario, data, apontamento, status) "
-             + "values (null, ?, ?, now(), ?, 'T')", [dados.id_tarefa, dados.id_usuario, dados.apontamento], function(err, rows, fields) {
+    conn.query("insert into ge_tarefa_movto (id_tarefa_movto "
+                                         + ",id_tarefa, id_usuario "
+                                         + ",data, apontamento, status) "
+             + "values (null, ?, ?, now(), ?, 'T')"
+              ,[dados.id_tarefa, dados.id_usuario, dados.apontamento]
+              ,function(err, rows, fields) {
       if (!!err)
         callback("Erro ao concluir tarefa ! ERR: " + err);
       else
@@ -137,7 +146,7 @@ app.get('/login/:usuario/:senha', function(req, res) {
 
   // criptografa senha para SHA1 para testar no banco de dados
   sha1 = crypto.createHash('sha1');
-  sha1.update("wnhg9" + senha + "fwj98"); // salt utilizado no cadastro de usuarios do portal
+  sha1.update("wnhg9" + senha + "fwj98"); // salt para fortalecer hash
   senha = sha1.digest('hex');
   sha1  = null;
 
@@ -149,8 +158,9 @@ app.get('/login/:usuario/:senha', function(req, res) {
       callback(null,'conectou');
     });
   }
- ,function(callback) { // Pega ID do usuario
-    conn.query("select id_usuario from ge_usuario where usuario = ? and senha = ?", [usuario, senha], function(err, rows, fields) {
+ ,function(callback) { // Verifica usuário e senha no banco
+    conn.query("select id_usuario from ge_usuario where usuario = ? and senha = ?"
+              ,[usuario, senha], function(err, rows, fields) {
       if (!!err) callback("Erro ao verificar usuario ! ERR: " + err);
       if (rows.length == 0)
         callback("Usuário e senha não conferem!");
@@ -415,7 +425,8 @@ function distancia(lat1, lng1, lat2, lng2) { // retorna distancia entre dois pon
      ,arco_abc   = lng2 - lng1
      ,arco_cos;
 
-  arco_cos = (Math.cos(arco_ac/rad) * Math.cos(arco_ab/rad)) + (Math.sin(arco_ac/rad) * Math.sin(arco_ab/rad) * Math.cos(arco_abc/rad));
+  arco_cos = (Math.cos(arco_ac/rad) * Math.cos(arco_ab/rad))
+           + (Math.sin(arco_ac/rad) * Math.sin(arco_ab/rad) * Math.cos(arco_abc/rad));
   arco_cos = (Math.acos(arco_cos) * 180) / Math.PI;
 
   return Math.round((2 * Math.PI * raio_terra * arco_cos) / 360);
@@ -444,7 +455,15 @@ function reverseGeocode(p_lat, p_lng, p_retorno, p_sinal) {
 
   function processar(json, p_retorno) {
     json = JSON.parse(json);
-    var endereco = {endereco:"", pais:"", estado:"", cidade:"", bairro:"", logradouro:"", numero:"", cep:""}, results;
+    var endereco = {endereco: ""
+                   ,pais: ""
+                   ,estado: ""
+                   ,cidade: ""
+                   ,bairro: ""
+                   ,logradouro: ""
+                   ,numero: ""
+                   ,cep: ""
+                   }, results;
     if (json.status === 'OK') {
       endereco.endereco = json.results[0].formatted_address;
       results = json.results[0].address_components;
